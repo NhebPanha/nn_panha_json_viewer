@@ -19,6 +19,8 @@ const monacoLanguage = computed(() => {
     case 'nestjs':
     case 'typeorm':
       return 'typescript'
+    case 'flutter':
+      return 'dart'
     case 'javascript':
     case 'mongoose':
     case 'sequelize':

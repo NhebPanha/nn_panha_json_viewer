@@ -2,7 +2,7 @@ import { ref } from 'vue'
 
 export interface ASTNode {
   key: string
-  inferredType: 'string' | 'number' | 'boolean' | 'date' | 'uuid' | 'array' | 'object' | 'null' | 'any'
+  inferredType: 'string' | 'number' | 'boolean' | 'date' | 'uuid' | 'color' | 'array' | 'object' | 'null' | 'any'
   isNullable: boolean
   isOptional: boolean
   isInteger?: boolean
@@ -22,6 +22,7 @@ export function toPascalCase(str: string): string {
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const DATE_REGEX = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})?$/
+const HEX_COLOR_REGEX = /^#([0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$|^0x([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/
 
 export function useJsonParser() {
   function inferType(val: any): ASTNode['inferredType'] {
@@ -29,6 +30,7 @@ export function useJsonParser() {
     if (typeof val === 'string') {
       if (UUID_REGEX.test(val)) return 'uuid'
       if (DATE_REGEX.test(val)) return 'date'
+      if (HEX_COLOR_REGEX.test(val)) return 'color'
       return 'string'
     }
     if (typeof val === 'number') return 'number'
@@ -116,6 +118,10 @@ export function useJsonParser() {
     // UUID & String mix -> default to string
     if (types.has('uuid') && types.has('string')) {
       types.delete('uuid')
+    }
+    // Color & String mix -> default to string
+    if (types.has('color') && types.has('string')) {
+      types.delete('color')
     }
 
     if (types.size === 1) {

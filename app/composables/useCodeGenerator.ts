@@ -78,7 +78,7 @@ export function useCodeGenerator() {
   // --- TYPESCRIPT / NODEJS ---
   function getTsType(node: ASTNode): string {
     let base = 'any'
-    if (node.inferredType === 'string' || node.inferredType === 'uuid') base = 'string'
+    if (node.inferredType === 'string' || node.inferredType === 'uuid' || node.inferredType === 'color') base = 'string'
     else if (node.inferredType === 'number') base = 'number'
     else if (node.inferredType === 'boolean') base = 'boolean'
     else if (node.inferredType === 'date') base = 'Date | string'
@@ -111,6 +111,7 @@ export function useCodeGenerator() {
   function getDartType(node: ASTNode): string {
     let base = 'dynamic'
     if (node.inferredType === 'string' || node.inferredType === 'uuid') base = 'String'
+    else if (node.inferredType === 'color') base = 'Color'
     else if (node.inferredType === 'number') base = node.isInteger ? 'int' : 'double'
     else if (node.inferredType === 'boolean') base = 'bool'
     else if (node.inferredType === 'date') base = 'DateTime'
@@ -138,12 +139,16 @@ export function useCodeGenerator() {
 
     const rootName = models[0]?.typeName || 'Welcome'
     const rootNameCamel = rootName.charAt(0).toLowerCase() + rootName.slice(1)
+    const hasColor = models.some(m => m.children?.some(c => hasColorType(c)))
 
     let code = ''
     code += `// To parse this JSON data, do\n`
     code += `//\n`
     code += `//     final ${rootNameCamel} = ${rootNameCamel}FromJson(jsonString);\n\n`
     code += `import 'dart:convert';\n`
+    if (hasColor) {
+      code += "import 'package:flutter/material.dart';\n"
+    }
     
     const isEquatable = style === 'equatable'
     if (isEquatable) {
@@ -200,6 +205,13 @@ export function useCodeGenerator() {
             } else {
               code += `        ${fieldName}: DateTime.parse(json["${key}"]),\n`
             }
+          } else if (child.inferredType === 'color') {
+            const isNull = child.isNullable || child.isOptional
+            if (isNull) {
+              code += `        ${fieldName}: json["${key}"] != null ? _parseColor(json["${key}"]) : null,\n`
+            } else {
+              code += `        ${fieldName}: _parseColor(json["${key}"]),\n`
+            }
           } else {
             code += `        ${fieldName}: json["${key}"],\n`
           }
@@ -220,6 +232,13 @@ export function useCodeGenerator() {
           } else if (child.inferredType === 'date') {
             const isNull = child.isNullable || child.isOptional
             code += `        "${key}": ${fieldName}${isNull ? '?' : ''}.toIso8601String(),\n`
+          } else if (child.inferredType === 'color') {
+            const isNull = child.isNullable || child.isOptional
+            if (isNull) {
+              code += `        "${key}": ${fieldName} != null ? _colorToHex(${fieldName}!) : null,\n`
+            } else {
+              code += `        "${key}": _colorToHex(${fieldName}),\n`
+            }
           } else {
             code += `        "${key}": ${fieldName},\n`
           }
@@ -240,11 +259,19 @@ export function useCodeGenerator() {
 
       code += '}\n\n'
     }
+    if (hasColor) {
+      code += `${getDartColorHelpers()}\n`
+    }
     return code.trim()
   }
 
   function generateFreezed(models: ASTNode[]): string {
-    let code = "import 'package:freezed_annotation/freezed_annotation.dart';\n\n"
+    const hasColor = models.some(m => m.children?.some(c => hasColorType(c)))
+    let code = "import 'package:freezed_annotation/freezed_annotation.dart';\n"
+    if (hasColor) {
+      code += "import 'package:flutter/material.dart';\n"
+    }
+    code += "\n"
     code += "part 'models.freezed.dart';\n"
     code += "part 'models.g.dart';\n\n"
 
@@ -256,6 +283,13 @@ export function useCodeGenerator() {
         for (const child of model.children) {
           const typeStr = getDartType(child)
           const isNull = child.isNullable || child.isOptional
+          if (child.inferredType === 'color') {
+            if (isNull) {
+              code += `    @JsonKey(fromJson: _parseColorNullable, toJson: _colorToHexNullable)\n`
+            } else {
+              code += `    @JsonKey(fromJson: _parseColor, toJson: _colorToHex)\n`
+            }
+          }
           code += `    ${isNull ? '' : 'required '}${typeStr}${isNull ? '?' : ''} ${child.key},\n`
         }
       }
@@ -263,11 +297,19 @@ export function useCodeGenerator() {
       code += `  factory ${model.typeName}.fromJson(Map<String, dynamic> json) => _\$${model.typeName}FromJson(json);\n`
       code += '}\n\n'
     }
+    if (hasColor) {
+      code += `${getDartColorHelpers()}\n`
+    }
     return code.trim()
   }
 
   function generateJsonSerializable(models: ASTNode[]): string {
-    let code = "import 'package:json_annotation/json_annotation.dart';\n\n"
+    const hasColor = models.some(m => m.children?.some(c => hasColorType(c)))
+    let code = "import 'package:json_annotation/json_annotation.dart';\n"
+    if (hasColor) {
+      code += "import 'package:flutter/material.dart';\n"
+    }
+    code += "\n"
     code += "part 'models.g.dart';\n\n"
 
     for (const model of models) {
@@ -277,6 +319,13 @@ export function useCodeGenerator() {
         for (const child of model.children) {
           const typeStr = getDartType(child)
           const isNull = child.isNullable || child.isOptional
+          if (child.inferredType === 'color') {
+            if (isNull) {
+              code += `  @JsonKey(fromJson: _parseColorNullable, toJson: _colorToHexNullable)\n`
+            } else {
+              code += `  @JsonKey(fromJson: _parseColor, toJson: _colorToHex)\n`
+            }
+          }
           code += `  final ${typeStr}${isNull ? '?' : ''} ${child.key};\n`
         }
       }
@@ -293,12 +342,15 @@ export function useCodeGenerator() {
       code += `  Map<String, dynamic> toJson() => _\$${model.typeName}ToJson(this);\n`
       code += '}\n\n'
     }
+    if (hasColor) {
+      code += `${getDartColorHelpers()}\n`
+    }
     return code.trim()
   }
 
   // --- LARAVEL / PHP ---
   function getPhpType(node: ASTNode): string {
-    if (node.inferredType === 'string' || node.inferredType === 'uuid') return 'string'
+    if (node.inferredType === 'string' || node.inferredType === 'uuid' || node.inferredType === 'color') return 'string'
     if (node.inferredType === 'number') return node.isInteger ? 'int' : 'float'
     if (node.inferredType === 'boolean') return 'bool'
     if (node.inferredType === 'date') return 'DateTime'
@@ -403,7 +455,7 @@ export function useCodeGenerator() {
 
   // --- JAVA / SPRING BOOT ---
   function getJavaType(node: ASTNode): string {
-    if (node.inferredType === 'string' || node.inferredType === 'uuid') return 'String'
+    if (node.inferredType === 'string' || node.inferredType === 'uuid' || node.inferredType === 'color') return 'String'
     if (node.inferredType === 'number') return node.isInteger ? 'Integer' : 'Double'
     if (node.inferredType === 'boolean') return 'Boolean'
     if (node.inferredType === 'date') return 'java.time.Instant'
@@ -493,7 +545,7 @@ export function useCodeGenerator() {
   // --- KOTLIN ---
   function getKotlinType(node: ASTNode): string {
     let base = 'Any'
-    if (node.inferredType === 'string' || node.inferredType === 'uuid') base = 'String'
+    if (node.inferredType === 'string' || node.inferredType === 'uuid' || node.inferredType === 'color') base = 'String'
     else if (node.inferredType === 'number') base = node.isInteger ? 'Int' : 'Double'
     else if (node.inferredType === 'boolean') base = 'Boolean'
     else if (node.inferredType === 'date') base = 'java.time.Instant'
@@ -521,7 +573,7 @@ export function useCodeGenerator() {
   // --- SWIFT ---
   function getSwiftType(node: ASTNode): string {
     let base = 'Any'
-    if (node.inferredType === 'string' || node.inferredType === 'uuid') base = 'String'
+    if (node.inferredType === 'string' || node.inferredType === 'uuid' || node.inferredType === 'color') base = 'String'
     else if (node.inferredType === 'number') base = node.isInteger ? 'Int' : 'Double'
     else if (node.inferredType === 'boolean') base = 'Bool'
     else if (node.inferredType === 'date') base = 'Date'
@@ -550,7 +602,7 @@ export function useCodeGenerator() {
   // --- GO ---
   function getGoType(node: ASTNode): string {
     let base = 'interface{}'
-    if (node.inferredType === 'string' || node.inferredType === 'uuid') base = 'string'
+    if (node.inferredType === 'string' || node.inferredType === 'uuid' || node.inferredType === 'color') base = 'string'
     else if (node.inferredType === 'number') base = node.isInteger ? 'int' : 'float64'
     else if (node.inferredType === 'boolean') base = 'bool'
     else if (node.inferredType === 'date') base = 'time.Time'
@@ -580,7 +632,7 @@ export function useCodeGenerator() {
   // --- C# / ASP.NET ---
   function getCSharpType(node: ASTNode): string {
     let base = 'object'
-    if (node.inferredType === 'string' || node.inferredType === 'uuid') base = 'string'
+    if (node.inferredType === 'string' || node.inferredType === 'uuid' || node.inferredType === 'color') base = 'string'
     else if (node.inferredType === 'number') base = node.isInteger ? 'int' : 'double'
     else if (node.inferredType === 'boolean') base = 'bool'
     else if (node.inferredType === 'date') base = 'DateTime'
@@ -737,6 +789,7 @@ export function useCodeGenerator() {
   function getPrismaType(node: ASTNode): string {
     if (node.inferredType === 'string') return 'String'
     if (node.inferredType === 'uuid') return 'String'
+    if (node.inferredType === 'color') return 'String'
     if (node.inferredType === 'number') return 'Float' // or Int
     if (node.inferredType === 'boolean') return 'Boolean'
     if (node.inferredType === 'date') return 'DateTime'
@@ -778,7 +831,7 @@ export function useCodeGenerator() {
 
   // --- MONGOOSE ---
   function getMongooseType(node: ASTNode): string {
-    if (node.inferredType === 'string' || node.inferredType === 'uuid') return 'String'
+    if (node.inferredType === 'string' || node.inferredType === 'uuid' || node.inferredType === 'color') return 'String'
     if (node.inferredType === 'number') return 'Number'
     if (node.inferredType === 'boolean') return 'Boolean'
     if (node.inferredType === 'date') return 'Date'
@@ -894,6 +947,7 @@ export function useCodeGenerator() {
   function getOpenApiType(node: ASTNode): any {
     if (node.inferredType === 'string') return { type: 'string' }
     if (node.inferredType === 'uuid') return { type: 'string', format: 'uuid' }
+    if (node.inferredType === 'color') return { type: 'string', format: 'color' }
     if (node.inferredType === 'number') return { type: 'number' }
     if (node.inferredType === 'boolean') return { type: 'boolean' }
     if (node.inferredType === 'date') return { type: 'string', format: 'date-time' }
@@ -942,6 +996,36 @@ export function useCodeGenerator() {
     }
 
     return JSON.stringify(openApiDoc, null, 2)
+  }
+
+  function hasColorType(node: ASTNode): boolean {
+    if (node.inferredType === 'color') return true
+    if (node.inferredType === 'array' && node.children?.[0]) {
+      return hasColorType(node.children[0])
+    }
+    return false
+  }
+
+  function getDartColorHelpers(): string {
+    return `Color _parseColor(String hexStr) {
+  String formatted = hexStr.replaceAll('#', '').replaceAll('0x', '');
+  if (formatted.length == 6) {
+    formatted = 'FF' + formatted;
+  } else if (formatted.length == 3) {
+    final r = formatted[0];
+    final g = formatted[1];
+    final b = formatted[2];
+    formatted = 'FF' + r + r + g + g + b + b;
+  }
+  return Color(int.parse(formatted, radix: 16));
+}
+
+String _colorToHex(Color color) {
+  return '#' + color.value.toRadixString(16).padLeft(8, '0');
+}
+
+Color? _parseColorNullable(String? hexStr) => hexStr == null ? null : _parseColor(hexStr);
+String? _colorToHexNullable(Color? color) => color == null ? null : _colorToHex(color);`;
   }
 
   return {
