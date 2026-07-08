@@ -20,6 +20,27 @@ export function toPascalCase(str: string): string {
     .join('')
 }
 
+export function cleanKey(key: string): string {
+  let k = key.trim()
+  while (
+    (k.startsWith('"') && k.endsWith('"')) ||
+    (k.startsWith("'") && k.endsWith("'")) ||
+    (k.startsWith('\\"') && k.endsWith('\\"')) ||
+    (k.startsWith("\\'") && k.endsWith("\\'"))
+  ) {
+    if (k.startsWith('\\"') && k.endsWith('\\"')) {
+      k = k.slice(2, -2)
+    } else if (k.startsWith("\\'") && k.endsWith("\\'")) {
+      k = k.slice(2, -2)
+    } else {
+      k = k.slice(1, -1)
+    }
+    k = k.trim()
+  }
+  k = k.replace(/\\"/g, '').replace(/\\'/g, '').replace(/"/g, '').replace(/'/g, '')
+  return k.trim()
+}
+
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const DATE_REGEX = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})?$/
 const HEX_COLOR_REGEX = /^#([0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$|^0x([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/
@@ -41,9 +62,10 @@ export function useJsonParser() {
   }
 
   function parseVal(key: string, val: any): ASTNode {
+    const cleanK = cleanKey(key)
     const type = inferType(val)
     const node: ASTNode = {
-      key,
+      key: cleanK,
       inferredType: type,
       isNullable: val === null,
       isOptional: false
@@ -245,10 +267,61 @@ export function tryParsePrintedMap(str: string): any {
   let currentKey = ''
   let currentValue = ''
   let inKey = true
+  let inString = false
+  let stringChar = ''
+  let isEscaped = false
 
   for (let i = 0; i < content.length; i++) {
     const char = content[i]
 
+    if (isEscaped) {
+      isEscaped = false
+      if (inKey) {
+        currentKey += char
+      } else {
+        currentValue += char
+      }
+      continue
+    }
+
+    if (char === '\\') {
+      isEscaped = true
+      if (inKey) {
+        currentKey += char
+      } else {
+        currentValue += char
+      }
+      continue
+    }
+
+    // Toggle string literal bounds
+    if (char === '"' || char === "'") {
+      if (!inString) {
+        inString = true
+        stringChar = char
+      } else if (char === stringChar) {
+        inString = false
+        stringChar = ''
+      }
+      
+      if (inKey) {
+        currentKey += char
+      } else {
+        currentValue += char
+      }
+      continue
+    }
+
+    if (inString) {
+      if (inKey) {
+        currentKey += char
+      } else {
+        currentValue += char
+      }
+      continue
+    }
+
+    // Process characters outside string literals
     if (char === '{') {
       braceCount++
       if (!inKey) currentValue += char
@@ -265,9 +338,9 @@ export function tryParsePrintedMap(str: string): any {
       inKey = false
     } else if (char === ',' && braceCount === 0 && bracketCount === 0 && !inKey) {
       const remaining = content.slice(i + 1)
-      const isNextKey = /^\s*[a-zA-Z0-9_]+\s*:/.test(remaining)
+      const isNextKey = /^\s*(?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|\\"(?:[^"\\]|\\.)*\\"|\\'(?:[^'\\]|\\.)*\\'|[^\s:]+)\s*:/.test(remaining)
       if (isNextKey) {
-        const key = currentKey.trim()
+        const key = cleanKey(currentKey)
         const val = currentValue.trim()
         result[key] = parsePrimitiveOrNested(val)
         
@@ -287,7 +360,7 @@ export function tryParsePrintedMap(str: string): any {
   }
 
   if (currentKey.trim()) {
-    const key = currentKey.trim()
+    const key = cleanKey(currentKey)
     const val = currentValue.trim()
     result[key] = parsePrimitiveOrNested(val)
   }
@@ -297,18 +370,94 @@ export function tryParsePrintedMap(str: string): any {
 
 function parsePrimitiveOrNested(val: string): any {
   val = val.trim()
-  if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
-    return val.slice(1, -1)
-  }
-  if (val === 'true') return true
-  if (val === 'false') return false
-  if (val === 'null') return null
-  if (!isNaN(Number(val)) && val !== '') return Number(val)
   
-  if (val.startsWith('{') && val.endsWith('}')) {
-    const nested = tryParsePrintedMap(val)
+  // Clean up outer quotes and escaped quotes of string values
+  let cleanVal = val
+  while (
+    (cleanVal.startsWith('"') && cleanVal.endsWith('"')) ||
+    (cleanVal.startsWith("'") && cleanVal.endsWith("'")) ||
+    (cleanVal.startsWith('\\"') && cleanVal.endsWith('\\"')) ||
+    (cleanVal.startsWith("\\'") && cleanVal.endsWith("\\'"))
+  ) {
+    if (cleanVal.startsWith('\\"') && cleanVal.endsWith('\\"')) {
+      cleanVal = cleanVal.slice(2, -2)
+    } else if (cleanVal.startsWith("\\'") && cleanVal.endsWith("\\'")) {
+      cleanVal = cleanVal.slice(2, -2)
+    } else {
+      cleanVal = cleanVal.slice(1, -1)
+    }
+    cleanVal = cleanVal.trim()
+  }
+  
+  // Check primitive types
+  if (cleanVal === 'true') return true
+  if (cleanVal === 'false') return false
+  if (cleanVal === 'null') return null
+  if (!isNaN(Number(cleanVal)) && cleanVal !== '') return Number(cleanVal)
+  
+  if (cleanVal.startsWith('[') && cleanVal.endsWith(']')) {
+    const inner = cleanVal.slice(1, -1).trim()
+    if (!inner) return []
+    const elements: any[] = []
+    let currentElement = ''
+    let bCount = 0
+    let brCount = 0
+    let inString = false
+    let stringChar = ''
+    let isEscaped = false
+    
+    for (let i = 0; i < inner.length; i++) {
+      const char = inner[i]
+      if (isEscaped) {
+        isEscaped = false
+        currentElement += char
+        continue
+      }
+      if (char === '\\') {
+        isEscaped = true
+        currentElement += char
+        continue
+      }
+      if (char === '"' || char === "'") {
+        if (!inString) {
+          inString = true
+          stringChar = char
+        } else if (stringChar === char) {
+          inString = false
+          stringChar = ''
+        }
+        currentElement += char
+        continue
+      }
+      
+      if (inString) {
+        currentElement += char
+        continue
+      }
+      
+      if (char === '{') bCount++
+      else if (char === '}') bCount--
+      else if (char === '[') brCount++
+      else if (char === ']') brCount--
+      
+      if (char === ',' && bCount === 0 && brCount === 0) {
+        elements.push(parsePrimitiveOrNested(currentElement))
+        currentElement = ''
+      } else {
+        currentElement += char
+      }
+    }
+    if (currentElement.trim()) {
+      elements.push(parsePrimitiveOrNested(currentElement))
+    }
+    return elements
+  }
+  
+  if (cleanVal.startsWith('{') && cleanVal.endsWith('}')) {
+    const nested = tryParsePrintedMap(cleanVal)
     if (nested !== null) return nested
   }
   
-  return val
+  // Clean slash escapes common in raw strings
+  return cleanVal.replace(/\\\\\//g, '/').replace(/\\\//g, '/')
 }
