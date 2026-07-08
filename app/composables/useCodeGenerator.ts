@@ -111,7 +111,7 @@ export function useCodeGenerator() {
   function getDartType(node: ASTNode): string {
     let base = 'dynamic'
     if (node.inferredType === 'string' || node.inferredType === 'uuid') base = 'String'
-    else if (node.inferredType === 'number') base = 'num'
+    else if (node.inferredType === 'number') base = node.isInteger ? 'int' : 'double'
     else if (node.inferredType === 'boolean') base = 'bool'
     else if (node.inferredType === 'date') base = 'DateTime'
     else if (node.inferredType === 'object') base = node.typeName || 'dynamic'
@@ -126,87 +126,116 @@ export function useCodeGenerator() {
     if (style === 'freezed') return generateFreezed(models)
     if (style === 'json_serializable') return generateJsonSerializable(models)
 
+    function toCamelCase(str: string): string {
+      if (!str) return ''
+      if (str === 'CID' || str === 'cid') return 'cid'
+      const parts = str.split(/[-_\s]+/)
+      return parts.map((part, index) => {
+        if (index === 0) return part.toLowerCase()
+        return part.charAt(0).toUpperCase() + part.slice(1)
+      }).join('')
+    }
+
+    const rootName = models[0]?.typeName || 'Welcome'
+    const rootNameCamel = rootName.charAt(0).toLowerCase() + rootName.slice(1)
+
     let code = ''
+    code += `// To parse this JSON data, do\n`
+    code += `//\n`
+    code += `//     final ${rootNameCamel} = ${rootNameCamel}FromJson(jsonString);\n\n`
+    code += `import 'dart:convert';\n`
+    
     const isEquatable = style === 'equatable'
     if (isEquatable) {
-      code += "import 'package:equatable/equatable.dart';\n\n"
+      code += "import 'package:equatable/equatable.dart';\n"
     }
+    code += '\n'
+
+    code += `${rootName} ${rootNameCamel}FromJson(String str) => ${rootName}.fromJson(json.decode(str));\n\n`
+    code += `String ${rootNameCamel}ToJson(${rootName} data) => json.encode(data.toJson());\n\n`
 
     for (const model of models) {
       code += `class ${model.typeName} ${isEquatable ? 'extends Equatable ' : ''}{\n`
       
+      const fieldPrefix = isEquatable ? 'final ' : ''
+
       // Fields
       if (model.children) {
         for (const child of model.children) {
           const typeStr = getDartType(child)
           const isNull = child.isNullable || child.isOptional
-          code += `  final ${typeStr}${isNull ? '?' : ''} ${child.key};\n`
+          const fieldName = toCamelCase(child.key)
+          code += `    ${fieldPrefix}${typeStr}${isNull ? '?' : ''} ${fieldName};\n`
         }
       }
       code += '\n'
 
       // Constructor
-      code += `  const ${model.typeName}({\n`
+      code += `    ${model.typeName}({\n`
       if (model.children) {
         for (const child of model.children) {
           const isNull = child.isNullable || child.isOptional
-          code += `    ${isNull ? '' : 'required '}this.${child.key},\n`
+          const fieldName = toCamelCase(child.key)
+          code += `        ${isNull ? '' : 'required '}this.${fieldName},\n`
         }
       }
-      code += '  });\n\n'
+      code += '    });\n\n'
 
       // From JSON
-      code += `  factory ${model.typeName}.fromJson(Map<String, dynamic> json) {\n`
-      code += `    return ${model.typeName}(\n`
+      code += `    factory ${model.typeName}.fromJson(Map<String, dynamic> json) => ${model.typeName}(\n`
       if (model.children) {
         for (const child of model.children) {
           const key = child.key
-          const typeStr = getDartType(child)
+          const fieldName = toCamelCase(key)
           if (child.inferredType === 'object') {
             const innerName = child.typeName || 'dynamic'
-            code += `      ${key}: json['${key}'] != null ? ${innerName}.fromJson(json['${key}']) : null,\n`
+            code += `        ${fieldName}: json["${key}"] != null ? ${innerName}.fromJson(json["${key}"]) : null,\n`
           } else if (child.inferredType === 'array' && child.children?.[0]?.inferredType === 'object') {
             const innerName = child.children[0].typeName || 'dynamic'
-            code += `      ${key}: json['${key}'] != null ? List<${innerName}>.from(json['${key}'].map((x) => ${innerName}.fromJson(x))) : null,\n`
+            code += `        ${fieldName}: json["${key}"] != null ? List<${innerName}>.from(json["${key}"].map((x) => ${innerName}.fromJson(x))) : null,\n`
+          } else if (child.inferredType === 'date') {
+            const isNull = child.isNullable || child.isOptional
+            if (isNull) {
+              code += `        ${fieldName}: json["${key}"] != null ? DateTime.parse(json["${key}"]) : null,\n`
+            } else {
+              code += `        ${fieldName}: DateTime.parse(json["${key}"]),\n`
+            }
           } else {
-            code += `      ${key}: json['${key}'],\n`
+            code += `        ${fieldName}: json["${key}"],\n`
           }
         }
       }
-      code += '    );\n'
-      code += '  }\n\n'
+      code += '    );\n\n'
 
       // To JSON
-      code += '  Map<String, dynamic> toJson() {\n'
-      code += '    final Map<String, dynamic> data = <String, dynamic>{};\n'
+      code += '    Map<String, dynamic> toJson() => {\n'
       if (model.children) {
         for (const child of model.children) {
           const key = child.key
+          const fieldName = toCamelCase(key)
           if (child.inferredType === 'object') {
-            code += `    if (this.${key} != null) {\n`
-            code += `      data['${key}'] = this.${key}!.toJson();\n`
-            code += '    }\n'
+            code += `        "${key}": ${fieldName}?.toJson(),\n`
           } else if (child.inferredType === 'array' && child.children?.[0]?.inferredType === 'object') {
-            code += `    if (this.${key} != null) {\n`
-            code += `      data['${key}'] = this.${key}!.map((v) => v.toJson()).toList();\n`
-            code += '    }\n'
+            code += `        "${key}": ${fieldName} != null ? List<dynamic>.from(${fieldName}!.map((x) => x.toJson())) : null,\n`
+          } else if (child.inferredType === 'date') {
+            const isNull = child.isNullable || child.isOptional
+            code += `        "${key}": ${fieldName}${isNull ? '?' : ''}.toIso8601String(),\n`
           } else {
-            code += `    data['${key}'] = this.${key};\n`
+            code += `        "${key}": ${fieldName},\n`
           }
         }
       }
-      code += '    return data;\n'
-      code += '  }\n'
+      code += '    };\n'
 
       // Equatable props
       if (isEquatable) {
-        code += '\n  @override\n  List<Object?> get props => [\n'
+        code += '\n    @override\n    List<Object?> get props => [\n'
         if (model.children) {
           for (const child of model.children) {
-            code += `        ${child.key},\n`
+            code += `        ${toCamelCase(child.key)},\n`
           }
         }
-        code += '      ];\n'
+        code += '    ];\n'
       }
 
       code += '}\n\n'
@@ -270,7 +299,7 @@ export function useCodeGenerator() {
   // --- LARAVEL / PHP ---
   function getPhpType(node: ASTNode): string {
     if (node.inferredType === 'string' || node.inferredType === 'uuid') return 'string'
-    if (node.inferredType === 'number') return 'float' // or int
+    if (node.inferredType === 'number') return node.isInteger ? 'int' : 'float'
     if (node.inferredType === 'boolean') return 'bool'
     if (node.inferredType === 'date') return 'DateTime'
     if (node.inferredType === 'object') return node.typeName || 'array'
@@ -375,7 +404,7 @@ export function useCodeGenerator() {
   // --- JAVA / SPRING BOOT ---
   function getJavaType(node: ASTNode): string {
     if (node.inferredType === 'string' || node.inferredType === 'uuid') return 'String'
-    if (node.inferredType === 'number') return 'Double'
+    if (node.inferredType === 'number') return node.isInteger ? 'Integer' : 'Double'
     if (node.inferredType === 'boolean') return 'Boolean'
     if (node.inferredType === 'date') return 'java.time.Instant'
     if (node.inferredType === 'object') return node.typeName || 'Object'
@@ -465,7 +494,7 @@ export function useCodeGenerator() {
   function getKotlinType(node: ASTNode): string {
     let base = 'Any'
     if (node.inferredType === 'string' || node.inferredType === 'uuid') base = 'String'
-    else if (node.inferredType === 'number') base = 'Double'
+    else if (node.inferredType === 'number') base = node.isInteger ? 'Int' : 'Double'
     else if (node.inferredType === 'boolean') base = 'Boolean'
     else if (node.inferredType === 'date') base = 'java.time.Instant'
     else if (node.inferredType === 'object') base = node.typeName || 'Any'
@@ -493,7 +522,7 @@ export function useCodeGenerator() {
   function getSwiftType(node: ASTNode): string {
     let base = 'Any'
     if (node.inferredType === 'string' || node.inferredType === 'uuid') base = 'String'
-    else if (node.inferredType === 'number') base = 'Double'
+    else if (node.inferredType === 'number') base = node.isInteger ? 'Int' : 'Double'
     else if (node.inferredType === 'boolean') base = 'Bool'
     else if (node.inferredType === 'date') base = 'Date'
     else if (node.inferredType === 'object') base = node.typeName || 'Any'
@@ -522,7 +551,7 @@ export function useCodeGenerator() {
   function getGoType(node: ASTNode): string {
     let base = 'interface{}'
     if (node.inferredType === 'string' || node.inferredType === 'uuid') base = 'string'
-    else if (node.inferredType === 'number') base = 'float64'
+    else if (node.inferredType === 'number') base = node.isInteger ? 'int' : 'float64'
     else if (node.inferredType === 'boolean') base = 'bool'
     else if (node.inferredType === 'date') base = 'time.Time'
     else if (node.inferredType === 'object') base = node.typeName || 'struct{}'
@@ -552,7 +581,7 @@ export function useCodeGenerator() {
   function getCSharpType(node: ASTNode): string {
     let base = 'object'
     if (node.inferredType === 'string' || node.inferredType === 'uuid') base = 'string'
-    else if (node.inferredType === 'number') base = 'double'
+    else if (node.inferredType === 'number') base = node.isInteger ? 'int' : 'double'
     else if (node.inferredType === 'boolean') base = 'bool'
     else if (node.inferredType === 'date') base = 'DateTime'
     else if (node.inferredType === 'object') base = node.typeName || 'object'

@@ -5,6 +5,7 @@ export interface ASTNode {
   inferredType: 'string' | 'number' | 'boolean' | 'date' | 'uuid' | 'array' | 'object' | 'null' | 'any'
   isNullable: boolean
   isOptional: boolean
+  isInteger?: boolean
   children?: ASTNode[] // Array element type or object properties
   typeName?: string    // PascalCase inferred name for objects
 }
@@ -46,6 +47,10 @@ export function useJsonParser() {
       isOptional: false
     }
 
+    if (type === 'number') {
+      node.isInteger = Number.isInteger(val)
+    }
+
     if (type === 'object' && val !== null) {
       node.typeName = toPascalCase(key)
       node.children = Object.entries(val).map(([k, v]) => parseVal(k, v))
@@ -79,6 +84,9 @@ export function useJsonParser() {
 
     if (types.size === 1) {
       const base = { ...nodes[0], isNullable }
+      if (base.inferredType === 'number') {
+        base.isInteger = nodes.every(n => n.isInteger)
+      }
       if (base.inferredType === 'object') {
         base.typeName = toPascalCase(fallbackTypeName)
         base.children = mergeObjectChildren(nodes.map(n => n.children || []))
