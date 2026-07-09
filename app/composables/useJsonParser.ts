@@ -2,12 +2,13 @@ import { ref } from 'vue'
 
 export interface ASTNode {
   key: string
-  inferredType: 'string' | 'number' | 'boolean' | 'date' | 'uuid' | 'color' | 'array' | 'object' | 'null' | 'any'
+  inferredType: 'string' | 'number' | 'boolean' | 'date' | 'uuid' | 'color' | 'array' | 'object' | 'union' | 'null' | 'any'
   isNullable: boolean
   isOptional: boolean
   isInteger?: boolean
-  children?: ASTNode[] // Array element type or object properties
-  typeName?: string    // PascalCase inferred name for objects
+  children?: ASTNode[]     // Array element type or object properties
+  unionTypes?: ASTNode[]   // Member types when inferredType === 'union'
+  typeName?: string        // PascalCase inferred name for objects
 }
 
 export function toPascalCase(str: string): string {
@@ -18,6 +19,19 @@ export function toPascalCase(str: string): string {
     .split(/\s+/)
     .map(w => w.charAt(0).toUpperCase() + w.slice(1))
     .join('')
+}
+
+/**
+ * Naive English singularization, QuickType-style, used to name array-element
+ * types after their property (e.g. `tags` → `Tag`, `categories` → `Category`).
+ */
+export function singularize(word: string): string {
+  if (!word) return word
+  if (/ies$/i.test(word)) return word.replace(/ies$/i, 'y')
+  if (/(ses|xes|zes|ches|shes)$/i.test(word)) return word.replace(/es$/i, '')
+  if (/ss$/i.test(word)) return word
+  if (/s$/i.test(word)) return word.replace(/s$/i, '')
+  return word
 }
 
 export function cleanKey(key: string): string {
@@ -87,9 +101,12 @@ export function useJsonParser() {
           isOptional: false
         }]
       } else {
-        // Sample the array elements to merge shapes
+        // Sample the array elements and merge their shapes into one element type.
+        // The element type is named after the singularized property (QuickType style):
+        // `tags` → `Tag`, `results` → `Result`.
         const elementNodes = val.map((item: any) => parseVal('element', item))
-        const mergedNode = mergeASTNodes(elementNodes, toPascalCase(key) + 'Item')
+        const elementTypeName = singularize(toPascalCase(key)) || 'Item'
+        const mergedNode = mergeASTNodes(elementNodes, elementTypeName)
         node.children = [mergedNode]
       }
     }
@@ -154,12 +171,30 @@ export function useJsonParser() {
       return merged
     }
 
-    // Default to 'any' for highly varied types
+    // Genuinely mixed types -> build a union (QuickType style), grouping and
+    // merging each constituent type so object members keep their own shape.
+    const nonNullNodes = nodes.filter(n => n.inferredType !== 'null')
+    const groups = new Map<string, ASTNode[]>()
+    for (const n of nonNullNodes) {
+      if (!groups.has(n.inferredType)) groups.set(n.inferredType, [])
+      groups.get(n.inferredType)!.push(n)
+    }
+    const unionTypes = Array.from(groups.entries()).map(([type, group], i) =>
+      mergeASTNodes(group, `${fallbackTypeName}${type === 'object' && i > 0 ? i + 1 : ''}`)
+    )
+
+    // A single surviving group (plus null) is just a nullable of that type.
+    if (unionTypes.length === 1) {
+      unionTypes[0].isNullable = isNullable
+      return unionTypes[0]
+    }
+
     return {
       key: 'element',
-      inferredType: 'any',
+      inferredType: 'union',
       isNullable,
-      isOptional: false
+      isOptional: false,
+      unionTypes
     }
   }
 
@@ -211,27 +246,57 @@ export function useJsonParser() {
     }
   }
 
-  // Deeply collect all unique object structures
+  // Structural signature of a node, used to deduplicate identical object shapes.
+  function structuralSignature(node: ASTNode): string {
+    switch (node.inferredType) {
+      case 'object':
+        return '{' + (node.children || [])
+          .map(c => `${c.key}${c.isOptional ? '?' : ''}:${structuralSignature(c)}`)
+          .sort()
+          .join(',') + '}'
+      case 'array':
+        return '[' + (node.children?.[0] ? structuralSignature(node.children[0]) : 'any') + ']'
+      case 'union':
+        return '(' + (node.unionTypes || []).map(structuralSignature).sort().join('|') + ')'
+      default:
+        return node.inferredType
+    }
+  }
+
+  // Deeply collect object models, merging structurally-identical shapes into a
+  // single named type (QuickType behaviour) instead of emitting Foo, Foo1, Foo2…
   function collectModels(rootNode: ASTNode): ASTNode[] {
     const models: ASTNode[] = []
-    const visited = new Set<string>()
+    const usedNames = new Set<string>()
+    const sigToName = new Map<string, string>()
+
+    function uniqueName(base: string): string {
+      const root = base || 'Root'
+      let name = root
+      let counter = 1
+      while (usedNames.has(name)) {
+        name = `${root}${counter}`
+        counter++
+      }
+      usedNames.add(name)
+      return name
+    }
 
     function traverse(node: ASTNode) {
       if (node.inferredType === 'object' && node.children) {
-        const typeName = node.typeName || 'Root'
-        
-        // Handle name collision
-        let finalTypeName = typeName
-        let counter = 1
-        while (visited.has(finalTypeName)) {
-          finalTypeName = `${typeName}_${counter}`
-          counter++
+        const sig = structuralSignature(node)
+        const existing = sigToName.get(sig)
+        if (existing) {
+          // Identical shape already emitted — reuse its type name, don't re-emit.
+          node.typeName = existing
+          return
         }
-        
+
+        const finalTypeName = uniqueName(node.typeName || 'Root')
         node.typeName = finalTypeName
-        visited.add(finalTypeName)
+        sigToName.set(sig, finalTypeName)
         models.push(node)
-        
+
         for (const child of node.children) {
           traverse(child)
         }
@@ -239,11 +304,15 @@ export function useJsonParser() {
         for (const child of node.children) {
           traverse(child)
         }
+      } else if (node.inferredType === 'union' && node.unionTypes) {
+        for (const member of node.unionTypes) {
+          traverse(member)
+        }
       }
     }
 
     traverse(rootNode)
-    // Reverse so dependencies (nested models) are declared first or structured logically
+    // Reverse so nested dependencies are declared before their consumers.
     return models.reverse()
   }
 

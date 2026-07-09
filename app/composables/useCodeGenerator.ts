@@ -87,6 +87,10 @@ export function useCodeGenerator() {
       const child = node.children?.[0]
       base = child ? `${getTsType(child)}[]` : 'any[]'
     }
+    else if (node.inferredType === 'union') {
+      const members = (node.unionTypes || []).map(m => getTsType({ ...m, isNullable: false }))
+      base = members.length ? Array.from(new Set(members)).join(' | ') : 'any'
+    }
     return base + (node.isNullable ? ' | null' : '')
   }
 
@@ -120,6 +124,7 @@ export function useCodeGenerator() {
       const child = node.children?.[0]
       base = child ? `List<${getDartType(child)}>` : 'List<dynamic>'
     }
+    else if (node.inferredType === 'union') base = 'dynamic'
     return base
   }
 
@@ -774,6 +779,10 @@ export function useCodeGenerator() {
             const childEl = child.children?.[0]
             jsDocType = childEl ? `Array<${childEl.typeName || childEl.inferredType}>` : 'Array'
           }
+          else if (child.inferredType === 'union') {
+            const members = (child.unionTypes || []).map(m => m.typeName || m.inferredType)
+            jsDocType = members.length ? Array.from(new Set(members)).join('|') : 'any'
+          }
 
           if (child.isNullable) jsDocType += '|null'
           const keyStr = child.isOptional ? `[${child.key}]` : child.key
@@ -958,6 +967,9 @@ export function useCodeGenerator() {
         type: 'array',
         items: child ? getOpenApiType(child) : { type: 'object' }
       }
+    }
+    if (node.inferredType === 'union') {
+      return { oneOf: (node.unionTypes || []).map(getOpenApiType) }
     }
     return { type: 'object' }
   }
