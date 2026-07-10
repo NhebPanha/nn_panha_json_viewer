@@ -5,7 +5,7 @@ export const SITE = {
   description:
     'Instantly generate strongly-typed models, DTOs, entities, and schemas from JSON in the browser. Supports Flutter, Laravel, TypeScript, Swift, Go, Kotlin, C#, Prisma, and more.',
   url: 'https://json-model-generator.vercel.app',
-  githubUrl: 'https://github.com',
+  githubUrl: 'https://github.com/NhebPanha',
   ogImage: '/og-image.png',
   twitterHandle: '@jsonmodelgen'
 } as const
