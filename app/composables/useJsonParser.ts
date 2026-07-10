@@ -229,18 +229,21 @@ export function useJsonParser() {
   function parseJson(jsonStr: string): ASTNode | null {
     const trimmed = jsonStr.trim()
     if (!trimmed) return null
-    
+
     try {
       const parsed = JSON.parse(trimmed)
       return parseVal('root', parsed)
     } catch (e: any) {
-      try {
-        const parsedObj = tryParsePrintedMap(trimmed)
-        if (parsedObj && Object.keys(parsedObj).length > 0) {
-          return parseVal('root', parsedObj)
+      // Only attempt the relaxed recovery for genuine printed-map input.
+      if (looksLikePrintedMap(trimmed)) {
+        try {
+          const parsedObj = tryParsePrintedMap(trimmed)
+          if (parsedObj && Object.keys(parsedObj).length > 0) {
+            return parseVal('root', parsedObj)
+          }
+        } catch (err) {
+          console.error('Failed to parse as printed map:', err)
         }
-      } catch (err) {
-        console.error('Failed to parse as printed map:', err)
       }
       throw e
     }
@@ -320,6 +323,18 @@ export function useJsonParser() {
     parseJson,
     collectModels
   }
+}
+
+/**
+ * Heuristic: does the input look like a relaxed "printed map" (Dart/JS object
+ * output) with UNQUOTED identifier keys, rather than standard JSON?
+ *
+ * Standard JSON always quotes its keys, so if JSON.parse fails on quoted-key
+ * input it's a real syntax error that must be surfaced — we only fall back to
+ * the lenient parser when there's evidence of unquoted keys.
+ */
+export function looksLikePrintedMap(str: string): boolean {
+  return /[{,]\s*[A-Za-z_$][\w$]*\s*:/.test(str)
 }
 
 export function tryParsePrintedMap(str: string): any {

@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, watch, onMounted } from 'vue'
-import { tryParsePrintedMap } from '~/composables/useJsonParser'
+import { tryParsePrintedMap, looksLikePrintedMap } from '~/composables/useJsonParser'
 
 const DEFAULT_JSON = `{
   "id": "f81d4fae-7dec-11d0-a765-00a0c91e6bf6",
@@ -52,16 +52,19 @@ export const useEditorStore = defineStore('editor', () => {
       lineError.value = null
       return true
     } catch (e: any) {
-      // Relaxed printed-map fallback check
-      try {
-        const parsed = tryParsePrintedMap(trimmed)
-        if (parsed && Object.keys(parsed).length > 0) {
-          isValid.value = true
-          errorMessage.value = null
-          lineError.value = null
-          return true
-        }
-      } catch (err) {}
+      // Relaxed printed-map fallback — only when the input has unquoted keys.
+      // Quoted-key JSON that fails to parse is a real syntax error, so report it.
+      if (looksLikePrintedMap(trimmed)) {
+        try {
+          const parsed = tryParsePrintedMap(trimmed)
+          if (parsed && Object.keys(parsed).length > 0) {
+            isValid.value = true
+            errorMessage.value = null
+            lineError.value = null
+            return true
+          }
+        } catch (err) {}
+      }
 
       isValid.value = false
       errorMessage.value = e.message
@@ -94,16 +97,18 @@ export const useEditorStore = defineStore('editor', () => {
       errorMessage.value = null
       lineError.value = null
     } catch (e) {
-      try {
-        const parsed = tryParsePrintedMap(trimmed)
-        if (parsed && Object.keys(parsed).length > 0) {
-          rawJson.value = JSON.stringify(parsed, null, 2)
-          isValid.value = true
-          errorMessage.value = null
-          lineError.value = null
-          return
-        }
-      } catch (err) {}
+      if (looksLikePrintedMap(trimmed)) {
+        try {
+          const parsed = tryParsePrintedMap(trimmed)
+          if (parsed && Object.keys(parsed).length > 0) {
+            rawJson.value = JSON.stringify(parsed, null, 2)
+            isValid.value = true
+            errorMessage.value = null
+            lineError.value = null
+            return
+          }
+        } catch (err) {}
+      }
       validateJson()
     }
   }
@@ -118,16 +123,18 @@ export const useEditorStore = defineStore('editor', () => {
       errorMessage.value = null
       lineError.value = null
     } catch (e) {
-      try {
-        const parsed = tryParsePrintedMap(trimmed)
-        if (parsed && Object.keys(parsed).length > 0) {
-          rawJson.value = JSON.stringify(parsed)
-          isValid.value = true
-          errorMessage.value = null
-          lineError.value = null
-          return
-        }
-      } catch (err) {}
+      if (looksLikePrintedMap(trimmed)) {
+        try {
+          const parsed = tryParsePrintedMap(trimmed)
+          if (parsed && Object.keys(parsed).length > 0) {
+            rawJson.value = JSON.stringify(parsed)
+            isValid.value = true
+            errorMessage.value = null
+            lineError.value = null
+            return
+          }
+        } catch (err) {}
+      }
       validateJson()
     }
   }
