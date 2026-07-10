@@ -135,7 +135,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="relative w-full h-full min-h-[400px] border border-t-0 border-slate-200 dark:border-slate-800 rounded-b-2xl overflow-hidden bg-white dark:bg-[#1e1e1e]">
+  <div class="relative w-full h-full min-h-[560px] border border-t-0 border-slate-200 dark:border-slate-800 rounded-b-2xl overflow-hidden bg-white dark:bg-[#1e1e1e]">
     <!-- Loading state / Fallback -->
     <div v-if="isLoading" class="absolute inset-0 flex flex-col items-center justify-center bg-slate-50 dark:bg-slate-900/40 text-slate-400 gap-2">
       <div class="w-6 h-6 border-2 border-brand-primary border-t-transparent rounded-full animate-spin"></div>
@@ -143,6 +143,6 @@ onBeforeUnmount(() => {
     </div>
 
     <!-- Monaco container -->
-    <div ref="containerRef" class="w-full h-[500px]"></div>
+    <div ref="containerRef" class="w-full h-[calc(100vh-300px)] min-h-[560px]"></div>
   </div>
 </template>

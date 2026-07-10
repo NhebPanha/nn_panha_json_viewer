@@ -13,7 +13,7 @@ import CodePreview from '../components/CodePreview.vue'
 import GenerationSettings from '../components/GenerationSettings.vue'
 import ErrorState from '../components/ErrorState.vue'
 import EmptyState from '../components/EmptyState.vue'
-import { Sparkles, FileJson, AlertCircle } from 'lucide-vue-next'
+import { FileJson } from 'lucide-vue-next'
 
 const editorStore = useEditorStore()
 const generatorStore = useGeneratorStore()
@@ -193,17 +193,9 @@ onBeforeUnmount(() => {
       class="hidden"
     />
 
-    <!-- Header Description -->
-    <div class="flex flex-col md:flex-row justify-between md:items-center gap-4">
-      <div>
-        <h1 class="text-2xl sm:text-3xl font-black text-slate-900 dark:text-white tracking-tight flex items-center gap-2">
-          Model Studio
-          <Sparkles class="w-5 h-5 text-brand-primary" />
-        </h1>
-        <p class="text-xs text-slate-500 dark:text-slate-400 mt-1">
-          Paste JSON, validate formatting, and export production-ready strongly-typed models instantly.
-        </p>
-      </div>
+    <!-- Settings Controls Panel (moved above the editor panels) -->
+    <div id="settings">
+      <GenerationSettings @generate="triggerGenerate" />
     </div>
 
     <!-- Panels: Editor & Preview -->
@@ -236,11 +228,6 @@ onBeforeUnmount(() => {
           <CodePreview v-else />
         </div>
       </div>
-    </div>
-
-    <!-- Settings Controls Panel -->
-    <div id="settings">
-      <GenerationSettings @generate="triggerGenerate" />
     </div>
 
     <!-- Help & Shortcuts Slide-over Drawer -->
