@@ -201,16 +201,24 @@ export function useCodeGenerator() {
         for (const child of model.children) {
           const key = child.key
           const fieldName = toCamelCase(key)
+          const isNull = child.isNullable || child.isOptional
           if (child.inferredType === 'object') {
             const innerName = child.typeName || 'dynamic'
-            code += `        ${fieldName}: json["${key}"] != null ? ${innerName}.fromJson(json["${key}"]) : null,\n`
+            if (isNull) {
+              code += `        ${fieldName}: json["${key}"] == null ? null : ${innerName}.fromJson(json["${key}"]),\n`
+            } else {
+              code += `        ${fieldName}: ${innerName}.fromJson(json["${key}"]),\n`
+            }
           } else if (child.inferredType === 'array' && child.children?.[0]?.inferredType === 'object') {
             const innerName = child.children[0].typeName || 'dynamic'
-            code += `        ${fieldName}: json["${key}"] != null ? List<${innerName}>.from(json["${key}"].map((x) => ${innerName}.fromJson(x))) : null,\n`
-          } else if (child.inferredType === 'date') {
-            const isNull = child.isNullable || child.isOptional
             if (isNull) {
-              code += `        ${fieldName}: json["${key}"] != null ? DateTime.parse(json["${key}"]) : null,\n`
+              code += `        ${fieldName}: json["${key}"] == null ? null : List<${innerName}>.from(json["${key}"].map((x) => ${innerName}.fromJson(x))),\n`
+            } else {
+              code += `        ${fieldName}: List<${innerName}>.from(json["${key}"].map((x) => ${innerName}.fromJson(x))),\n`
+            }
+          } else if (child.inferredType === 'date') {
+            if (isNull) {
+              code += `        ${fieldName}: json["${key}"] == null ? null : DateTime.parse(json["${key}"]),\n`
             } else {
               code += `        ${fieldName}: DateTime.parse(json["${key}"]),\n`
             }
@@ -227,12 +235,16 @@ export function useCodeGenerator() {
         for (const child of model.children) {
           const key = child.key
           const fieldName = toCamelCase(key)
+          const isNull = child.isNullable || child.isOptional
           if (child.inferredType === 'object') {
-            code += `        "${key}": ${fieldName}?.toJson(),\n`
+            code += `        "${key}": ${fieldName}${isNull ? '?' : ''}.toJson(),\n`
           } else if (child.inferredType === 'array' && child.children?.[0]?.inferredType === 'object') {
-            code += `        "${key}": ${fieldName} != null ? List<dynamic>.from(${fieldName}!.map((x) => x.toJson())) : null,\n`
+            if (isNull) {
+              code += `        "${key}": ${fieldName} == null ? null : List<dynamic>.from(${fieldName}!.map((x) => x.toJson())),\n`
+            } else {
+              code += `        "${key}": List<dynamic>.from(${fieldName}.map((x) => x.toJson())),\n`
+            }
           } else if (child.inferredType === 'date') {
-            const isNull = child.isNullable || child.isOptional
             code += `        "${key}": ${fieldName}${isNull ? '?' : ''}.toIso8601String(),\n`
           } else {
             code += `        "${key}": ${fieldName},\n`
