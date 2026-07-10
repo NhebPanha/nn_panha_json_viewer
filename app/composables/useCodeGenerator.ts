@@ -70,6 +70,14 @@ export function useCodeGenerator() {
         return generateGraphQL(models, framework)
       case 'openapi':
         return generateOpenAPI(models)
+      case 'python':
+        return generatePython(models, framework)
+      case 'rust':
+        return generateRust(models)
+      case 'zod':
+        return generateZod(models)
+      case 'json_schema':
+        return generateJsonSchema(models)
       default:
         return `// Language '${language}' not implemented yet.`
     }
@@ -1008,6 +1016,186 @@ export function useCodeGenerator() {
     }
 
     return JSON.stringify(openApiDoc, null, 2)
+  }
+
+  function snakeCase(str: string): string {
+    return str
+      .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+      .replace(/[\s-]+/g, '_')
+      .toLowerCase()
+  }
+
+  // --- PYTHON (dataclass / pydantic / TypedDict) ---
+  function getPythonType(node: ASTNode): string {
+    let base = 'Any'
+    if (node.inferredType === 'string' || node.inferredType === 'uuid' || node.inferredType === 'color') base = 'str'
+    else if (node.inferredType === 'number') base = node.isInteger ? 'int' : 'float'
+    else if (node.inferredType === 'boolean') base = 'bool'
+    else if (node.inferredType === 'date') base = 'datetime'
+    else if (node.inferredType === 'object') base = `'${node.typeName || 'Any'}'`
+    else if (node.inferredType === 'array') {
+      const child = node.children?.[0]
+      base = `List[${child ? getPythonType(child) : 'Any'}]`
+    }
+    else if (node.inferredType === 'union') {
+      const members = (node.unionTypes || []).map(getPythonType)
+      base = members.length ? `Union[${Array.from(new Set(members)).join(', ')}]` : 'Any'
+    }
+    return (node.isNullable || node.isOptional) ? `Optional[${base}]` : base
+  }
+
+  function generatePython(models: ASTNode[], style: string): string {
+    const isPydantic = style === 'pydantic'
+    const isTypedDict = style === 'typeddict'
+
+    let header = 'from __future__ import annotations\n'
+    header += 'from typing import List, Optional, Union, Any'
+    if (isTypedDict) header += ', TypedDict'
+    header += '\n'
+    header += 'from datetime import datetime\n'
+    if (isPydantic) header += 'from pydantic import BaseModel\n'
+    else if (!isTypedDict) header += 'from dataclasses import dataclass\n'
+    header += '\n\n'
+
+    let code = ''
+    for (const model of models) {
+      if (isPydantic) {
+        code += `class ${model.typeName}(BaseModel):\n`
+      } else if (isTypedDict) {
+        code += `class ${model.typeName}(TypedDict):\n`
+      } else {
+        code += `@dataclass\nclass ${model.typeName}:\n`
+      }
+      const children = model.children || []
+      if (children.length === 0) {
+        code += '    pass\n'
+      } else {
+        for (const child of children) {
+          code += `    ${snakeCase(child.key)}: ${getPythonType(child)}\n`
+        }
+      }
+      code += '\n\n'
+    }
+    return (header + code).trim()
+  }
+
+  // --- RUST (serde) ---
+  function getRustType(node: ASTNode): string {
+    let base = 'serde_json::Value'
+    if (node.inferredType === 'string' || node.inferredType === 'uuid' || node.inferredType === 'color') base = 'String'
+    else if (node.inferredType === 'number') base = node.isInteger ? 'i64' : 'f64'
+    else if (node.inferredType === 'boolean') base = 'bool'
+    else if (node.inferredType === 'date') base = 'String'
+    else if (node.inferredType === 'object') base = node.typeName || 'serde_json::Value'
+    else if (node.inferredType === 'array') {
+      const child = node.children?.[0]
+      base = `Vec<${child ? getRustType(child) : 'serde_json::Value'}>`
+    }
+    else if (node.inferredType === 'union') base = 'serde_json::Value'
+    return (node.isNullable || node.isOptional) ? `Option<${base}>` : base
+  }
+
+  function generateRust(models: ASTNode[]): string {
+    let code = 'use serde::{Deserialize, Serialize};\n\n'
+    for (const model of models) {
+      code += '#[derive(Debug, Clone, Serialize, Deserialize)]\n'
+      code += `pub struct ${model.typeName} {\n`
+      if (model.children) {
+        for (const child of model.children) {
+          const field = snakeCase(child.key)
+          if (field !== child.key) {
+            code += `    #[serde(rename = "${child.key}")]\n`
+          }
+          code += `    pub ${field}: ${getRustType(child)},\n`
+        }
+      }
+      code += '}\n\n'
+    }
+    return code.trim()
+  }
+
+  // --- ZOD ---
+  function getZodType(node: ASTNode): string {
+    let base = 'z.any()'
+    if (node.inferredType === 'string' || node.inferredType === 'color') base = 'z.string()'
+    else if (node.inferredType === 'uuid') base = 'z.string().uuid()'
+    else if (node.inferredType === 'number') base = 'z.number()'
+    else if (node.inferredType === 'boolean') base = 'z.boolean()'
+    else if (node.inferredType === 'date') base = 'z.coerce.date()'
+    else if (node.inferredType === 'object') base = node.typeName ? `${node.typeName}Schema` : 'z.any()'
+    else if (node.inferredType === 'array') {
+      const child = node.children?.[0]
+      base = `z.array(${child ? getZodType(child) : 'z.any()'})`
+    }
+    else if (node.inferredType === 'union') {
+      const members = (node.unionTypes || []).map(getZodType)
+      base = members.length > 1 ? `z.union([${members.join(', ')}])` : (members[0] || 'z.any()')
+    }
+    if (node.isNullable) base += '.nullable()'
+    if (node.isOptional) base += '.optional()'
+    return base
+  }
+
+  function generateZod(models: ASTNode[]): string {
+    let code = 'import { z } from "zod";\n\n'
+    for (const model of models) {
+      code += `export const ${model.typeName}Schema = z.object({\n`
+      if (model.children) {
+        for (const child of model.children) {
+          const safeKey = /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(child.key) ? child.key : `"${child.key}"`
+          code += `  ${safeKey}: ${getZodType(child)},\n`
+        }
+      }
+      code += '});\n'
+      code += `export type ${model.typeName} = z.infer<typeof ${model.typeName}Schema>;\n\n`
+    }
+    return code.trim()
+  }
+
+  // --- JSON SCHEMA (Draft-07) ---
+  function getJsonSchemaType(node: ASTNode): any {
+    if (node.inferredType === 'string') return { type: 'string' }
+    if (node.inferredType === 'uuid') return { type: 'string', format: 'uuid' }
+    if (node.inferredType === 'color') return { type: 'string' }
+    if (node.inferredType === 'number') return { type: node.isInteger ? 'integer' : 'number' }
+    if (node.inferredType === 'boolean') return { type: 'boolean' }
+    if (node.inferredType === 'date') return { type: 'string', format: 'date-time' }
+    if (node.inferredType === 'object') return { $ref: `#/definitions/${node.typeName}` }
+    if (node.inferredType === 'array') {
+      const child = node.children?.[0]
+      return { type: 'array', items: child ? getJsonSchemaType(child) : {} }
+    }
+    if (node.inferredType === 'union') {
+      return { oneOf: (node.unionTypes || []).map(getJsonSchemaType) }
+    }
+    return {}
+  }
+
+  function generateJsonSchema(models: ASTNode[]): string {
+    const definitions: Record<string, any> = {}
+    for (const model of models) {
+      const properties: Record<string, any> = {}
+      const required: string[] = []
+      if (model.children) {
+        for (const child of model.children) {
+          properties[child.key] = getJsonSchemaType(child)
+          if (!child.isNullable && !child.isOptional) required.push(child.key)
+        }
+      }
+      definitions[model.typeName || 'Root'] = {
+        type: 'object',
+        properties,
+        ...(required.length ? { required } : {})
+      }
+    }
+    // Root is the last model emitted (collectModels reverses dependencies first).
+    const rootName = models[models.length - 1]?.typeName || 'Root'
+    const doc = {
+      $schema: 'http://json-schema.org/draft-07/schema#',
+      $ref: `#/definitions/${rootName}`,
+      definitions
+    }
+    return JSON.stringify(doc, null, 2)
   }
 
   function hasColorType(node: ASTNode): boolean {

@@ -6,6 +6,7 @@ import { useCodeGenerator } from '~/composables/useCodeGenerator'
 import { useClipboard } from '~/composables/useClipboard'
 import { useFileUpload } from '~/composables/useFileUpload'
 import { useToast } from '~/composables/useToast'
+import { useShareLink } from '~/composables/useShareLink'
 import JsonToolbar from '../components/JsonToolbar.vue'
 import JsonEditor from '../components/JsonEditor.vue'
 import CodeToolbar from '../components/CodeToolbar.vue'
@@ -21,6 +22,8 @@ const codeGen = useCodeGenerator()
 const { handleFile } = useFileUpload()
 const { copy } = useClipboard()
 const toast = useToast()
+const { applyStateFromQuery } = useShareLink()
+const route = useRoute()
 
 const isDragging = ref(false)
 
@@ -157,6 +160,12 @@ const handleGlobalKeydown = (e: KeyboardEvent) => {
 }
 
 onMounted(() => {
+  // Restore shared state from ?s= permalink (takes precedence over local storage).
+  if (typeof route.query.s === 'string' && route.query.s) {
+    if (applyStateFromQuery(route.query.s)) {
+      toast.success('Loaded shared JSON from link')
+    }
+  }
   window.addEventListener('keydown', handleGlobalKeydown)
   triggerGenerate()
 })

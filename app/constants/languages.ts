@@ -161,5 +161,35 @@ export const LANGUAGES: LanguageOption[] = [
     options: [
       { id: 'schema', name: 'Schema' }
     ]
+  },
+  {
+    id: 'python',
+    name: 'Python',
+    options: [
+      { id: 'dataclass', name: 'Dataclass' },
+      { id: 'pydantic', name: 'Pydantic' },
+      { id: 'typeddict', name: 'TypedDict' }
+    ]
+  },
+  {
+    id: 'rust',
+    name: 'Rust',
+    options: [
+      { id: 'serde', name: 'Serde Struct' }
+    ]
+  },
+  {
+    id: 'zod',
+    name: 'Zod',
+    options: [
+      { id: 'schema', name: 'Schema' }
+    ]
+  },
+  {
+    id: 'json_schema',
+    name: 'JSON Schema',
+    options: [
+      { id: 'schema', name: 'Draft-07' }
+    ]
   }
 ]

@@ -42,8 +42,15 @@ const monacoLanguage = computed(() => {
       return 'csharp'
     case 'graphql':
       return 'graphql'
+    case 'python':
+      return 'python'
+    case 'rust':
+      return 'rust'
+    case 'zod':
+      return 'typescript'
     case 'openapi':
     case 'prisma':
+    case 'json_schema':
       return 'json' // Fallback for schema definitions
     default:
       return 'plaintext'

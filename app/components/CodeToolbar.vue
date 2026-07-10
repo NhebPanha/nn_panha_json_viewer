@@ -2,15 +2,28 @@
 import { useGeneratorStore } from '~/stores/generator.store'
 import { useClipboard } from '~/composables/useClipboard'
 import { useDownload } from '~/composables/useDownload'
-import { Copy, Download, Maximize2, Minimize2, WrapText, Check, FileCode } from 'lucide-vue-next'
+import { useShareLink } from '~/composables/useShareLink'
+import { useToast } from '~/composables/useToast'
+import { Copy, Download, Maximize2, Minimize2, WrapText, Check, FileCode, Share2 } from 'lucide-vue-next'
 import { computed } from 'vue'
 
 const generatorStore = useGeneratorStore()
 const { copy, copied } = useClipboard()
 const { download } = useDownload()
+const { buildShareUrl } = useShareLink()
+const toast = useToast()
 
 const handleCopy = () => {
   copy(generatorStore.generatedCode)
+}
+
+const handleShare = async () => {
+  try {
+    await navigator.clipboard.writeText(buildShareUrl())
+    toast.success('Share link copied to clipboard')
+  } catch {
+    toast.error('Could not copy the share link')
+  }
 }
 
 const fileExtension = computed(() => {
@@ -46,7 +59,14 @@ const fileExtension = computed(() => {
       return 'prisma'
     case 'graphql':
       return 'graphql'
+    case 'python':
+      return 'py'
+    case 'rust':
+      return 'rs'
+    case 'zod':
+      return 'ts'
     case 'openapi':
+    case 'json_schema':
       return 'json'
     default:
       return 'txt'
@@ -97,6 +117,14 @@ const handleDownload = () => {
       </button>
 
       <div class="h-4 w-px bg-slate-200 dark:bg-slate-800 mx-1"></div>
+
+      <button
+        @click="handleShare"
+        title="Copy shareable link"
+        class="p-1.5 rounded-lg text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-200/50 dark:hover:bg-slate-850 transition-all cursor-pointer"
+      >
+        <Share2 class="w-4 h-4" />
+      </button>
 
       <button
         @click="handleDownload"
