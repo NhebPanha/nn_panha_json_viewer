@@ -235,7 +235,7 @@ export function useJsonParser() {
     const isNullable = nodes.some(n => n.isNullable)
 
     if (types.size === 1) {
-      const base = { ...nodes[0], isNullable }
+      const base: ASTNode = { ...nodes[0]!, isNullable }
       if (base.inferredType === 'number') {
         base.isInteger = nodes.every(n => n.isInteger)
       }
@@ -328,7 +328,10 @@ export function useJsonParser() {
       const isNullable = nodes.some(n => n.isNullable)
       const merged = mergeASTNodes(nodes, toPascalCase(key))
       merged.key = key
-      merged.isOptional = isOptional
+      // Nested arrays get merged twice (once per element, once when the outer
+      // element type is rebuilt). The second pass sees a single already-merged
+      // node, so optionality must be carried over rather than recomputed away.
+      merged.isOptional = isOptional || nodes.some(n => n.isOptional)
       merged.isNullable = merged.isNullable || isNullable
       mergedChildren.push(merged)
     }
@@ -476,6 +479,36 @@ export function repairJson(input: string): string | null {
     if (lc === '"' || lc === '}' || lc === ']' || /[0-9A-Za-z_]/.test(lc)) out += ','
   }
 
+  // A string literal at the very end of `out`. The content class excludes `"`,
+  // so this can only ever match the last complete string, never span several.
+  const TRAILING_STRING = /"(?:[^"\\]|\\.)*"\s*$/
+
+  /**
+   * Input truncated mid-record leaves a property with no value behind — either
+   * `{"a":1,"b":` or `{"a":1,"b"`. Both are unrecoverable as data, so drop the
+   * partial property (and any trailing comma) rather than failing the whole parse.
+   */
+  const dropDanglingKey = () => {
+    out = out.replace(/[\s,]+$/, '')
+
+    const withColon = out.match(/"(?:[^"\\]|\\.)*"\s*:\s*$/)
+    if (withColon) {
+      out = out.slice(0, out.length - withColon[0].length).replace(/[\s,]+$/, '')
+      return
+    }
+
+    const bareKey = out.match(TRAILING_STRING)
+    if (bareKey) {
+      const before = out.slice(0, out.length - bareKey[0].length).replace(/\s+$/, '')
+      const prev = before[before.length - 1]
+      // Preceded by `,` or `{` means it sat in key position with no `:` after it.
+      // Preceded by `:` it's a legitimate value and must be kept.
+      if (prev === ',' || prev === '{') {
+        out = before.replace(/[\s,]+$/, '')
+      }
+    }
+  }
+
   while (i < src.length) {
     const ch = src[i]!
 
@@ -521,7 +554,8 @@ export function repairJson(input: string): string | null {
     }
 
     if (ch === '}' || ch === ']') {
-      out = out.replace(/,\s*$/, '') // drop trailing comma
+      if (ch === '}') dropDanglingKey()
+      else out = out.replace(/,\s*$/, '') // drop trailing comma
       if (stack.length) stack.pop()
       out += ch
       i++
@@ -555,7 +589,13 @@ export function repairJson(input: string): string | null {
 
   out = out.replace(/,\s*$/, '')
   while (stack.length) {
-    out += stack.pop() === '{' ? '}' : ']'
+    if (stack.pop() === '{') {
+      dropDanglingKey()
+      out += '}'
+    } else {
+      out = out.replace(/,\s*$/, '')
+      out += ']'
+    }
   }
 
   try {
