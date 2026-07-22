@@ -22,7 +22,7 @@ const codeGen = useCodeGenerator()
 const { handleFile } = useFileUpload()
 const { copy } = useClipboard()
 const toast = useToast()
-const { applyStateFromQuery } = useShareLink()
+const { applyStateFromQuery, applyStateFromId } = useShareLink()
 const route = useRoute()
 
 const isDragging = ref(false)
@@ -168,9 +168,16 @@ const handleGlobalKeydown = (e: KeyboardEvent) => {
   }
 }
 
-onMounted(() => {
-  // Restore shared state from ?s= permalink (takes precedence over local storage).
-  if (typeof route.query.s === 'string' && route.query.s) {
+onMounted(async () => {
+  // Restore shared state from a link (takes precedence over local storage).
+  // ?id= is a short /s/<id> link; ?s= is the long self-contained fallback.
+  if (typeof route.query.id === 'string' && route.query.id) {
+    if (await applyStateFromId(route.query.id)) {
+      toast.success('Loaded shared JSON from link')
+    } else {
+      toast.error('This share link is invalid or has expired')
+    }
+  } else if (typeof route.query.s === 'string' && route.query.s) {
     if (applyStateFromQuery(route.query.s)) {
       toast.success('Loaded shared JSON from link')
     }

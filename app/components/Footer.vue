@@ -7,7 +7,7 @@ import { Cpu } from 'lucide-vue-next'
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col md:flex-row items-center justify-between gap-4">
       <div class="flex items-center gap-2 text-xs text-slate-400 dark:text-slate-500">
         <Cpu class="w-4 h-4" />
-        <span>100% Client-Side Generation • No data leaves your machine</span>
+        <span>100% Client-Side Generation • Your JSON stays in your browser unless you create a share link</span>
       </div>
 
       <div class="text-xs text-slate-400 dark:text-slate-500">

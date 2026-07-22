@@ -5,24 +5,34 @@ import { useDownload } from '~/composables/useDownload'
 import { useShareLink } from '~/composables/useShareLink'
 import { useToast } from '~/composables/useToast'
 import { Copy, Download, Maximize2, Minimize2, WrapText, Check, FileCode, Share2 } from 'lucide-vue-next'
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 
 const generatorStore = useGeneratorStore()
 const { copy, copied } = useClipboard()
 const { download } = useDownload()
-const { buildShareUrl } = useShareLink()
+const { createShareUrl } = useShareLink()
 const toast = useToast()
+const sharing = ref(false)
 
 const handleCopy = () => {
   copy(generatorStore.generatedCode)
 }
 
 const handleShare = async () => {
+  if (sharing.value) return
+  sharing.value = true
   try {
-    await navigator.clipboard.writeText(buildShareUrl())
-    toast.success('Share link copied to clipboard')
+    const { url, short } = await createShareUrl()
+    await navigator.clipboard.writeText(url)
+    toast.success(
+      short
+        ? 'Short share link copied to clipboard'
+        : 'Share link copied (short links unavailable — using full link)'
+    )
   } catch {
     toast.error('Could not copy the share link')
+  } finally {
+    sharing.value = false
   }
 }
 
