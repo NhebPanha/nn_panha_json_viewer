@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, watch, onMounted } from 'vue'
-import { tryParsePrintedMap, looksLikePrintedMap } from '~/composables/useJsonParser'
+import { parseLoose } from '~/composables/useJsonParser'
 
 const DEFAULT_JSON = `{
   "id": "f81d4fae-7dec-11d0-a765-00a0c91e6bf6",
@@ -52,18 +52,13 @@ export const useEditorStore = defineStore('editor', () => {
       lineError.value = null
       return true
     } catch (e: any) {
-      // Relaxed printed-map fallback — only when the input has unquoted keys.
-      // Quoted-key JSON that fails to parse is a real syntax error, so report it.
-      if (looksLikePrintedMap(trimmed)) {
-        try {
-          const parsed = tryParsePrintedMap(trimmed)
-          if (parsed && Object.keys(parsed).length > 0) {
-            isValid.value = true
-            errorMessage.value = null
-            lineError.value = null
-            return true
-          }
-        } catch (err) {}
+      // Relaxed fallbacks: JSON embedded in log output, printed maps, or input
+      // with repairable syntax mistakes still counts as usable.
+      if (parseLoose(trimmed)) {
+        isValid.value = true
+        errorMessage.value = null
+        lineError.value = null
+        return true
       }
 
       isValid.value = false
@@ -102,17 +97,13 @@ export const useEditorStore = defineStore('editor', () => {
       errorMessage.value = null
       lineError.value = null
     } catch (e) {
-      if (looksLikePrintedMap(trimmed)) {
-        try {
-          const parsed = tryParsePrintedMap(trimmed)
-          if (parsed && Object.keys(parsed).length > 0) {
-            rawJson.value = JSON.stringify(parsed, null, 2)
-            isValid.value = true
-            errorMessage.value = null
-            lineError.value = null
-            return
-          }
-        } catch (err) {}
+      const loose = parseLoose(trimmed)
+      if (loose) {
+        rawJson.value = JSON.stringify(loose.data, null, 2)
+        isValid.value = true
+        errorMessage.value = null
+        lineError.value = null
+        return
       }
       validateJson()
     }
@@ -128,17 +119,13 @@ export const useEditorStore = defineStore('editor', () => {
       errorMessage.value = null
       lineError.value = null
     } catch (e) {
-      if (looksLikePrintedMap(trimmed)) {
-        try {
-          const parsed = tryParsePrintedMap(trimmed)
-          if (parsed && Object.keys(parsed).length > 0) {
-            rawJson.value = JSON.stringify(parsed)
-            isValid.value = true
-            errorMessage.value = null
-            lineError.value = null
-            return
-          }
-        } catch (err) {}
+      const loose = parseLoose(trimmed)
+      if (loose) {
+        rawJson.value = JSON.stringify(loose.data)
+        isValid.value = true
+        errorMessage.value = null
+        lineError.value = null
+        return
       }
       validateJson()
     }

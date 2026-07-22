@@ -59,6 +59,117 @@ const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12
 const DATE_REGEX = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})?$/
 const HEX_COLOR_REGEX = /^#([0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$|^0x([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/
 
+/**
+ * Scan `input` for balanced `{...}` / `[...]` regions, ignoring braces that sit
+ * inside string literals. Regions that never close (truncated log output) are
+ * skipped. Returns every candidate found, outermost-first.
+ */
+export function findJsonRegions(input: string): string[] {
+  const regions: string[] = []
+  let i = 0
+
+  while (i < input.length) {
+    const ch = input[i]
+    if (ch !== '{' && ch !== '[') { i++; continue }
+
+    const stack: string[] = []
+    let inString = false
+    let escaped = false
+    let end = -1
+
+    for (let j = i; j < input.length; j++) {
+      const c = input[j]!
+      if (inString) {
+        if (escaped) escaped = false
+        else if (c === '\\') escaped = true
+        else if (c === '"') inString = false
+        continue
+      }
+      if (c === '"') { inString = true; continue }
+      if (c === '{' || c === '[') stack.push(c)
+      else if (c === '}' || c === ']') {
+        const open = stack.pop()
+        if ((c === '}' && open !== '{') || (c === ']' && open !== '[')) { end = -1; break }
+        if (stack.length === 0) { end = j; break }
+      }
+    }
+
+    if (end === -1) { i++; continue }
+    regions.push(input.slice(i, end + 1))
+    i = end + 1
+  }
+
+  return regions
+}
+
+/**
+ * Pull real JSON out of surrounding noise — Flutter/Android log lines
+ * (`I/flutter (123): …`, `[log] label ----- [...]`), console dumps, or any text
+ * that merely *contains* a JSON document. Returns the largest region that parses
+ * cleanly, or the largest balanced region as a repair candidate.
+ */
+export function extractJsonFromText(input: string): string | null {
+  const regions = findJsonRegions(input)
+  if (regions.length === 0) return null
+
+  const byLength = [...regions].sort((a, b) => b.length - a.length)
+  for (const region of byLength) {
+    try {
+      JSON.parse(region)
+      return region
+    } catch {}
+  }
+  for (const region of byLength) {
+    const repaired = repairJson(region)
+    if (repaired) return repaired
+  }
+  return null
+}
+
+export interface LooseParseResult {
+  data: any
+  /** How the value was recovered — `json` means the input was already valid. */
+  source: 'json' | 'extracted' | 'printed-map' | 'repaired'
+}
+
+/**
+ * Single entry point for turning arbitrary pasted text into a value, trying the
+ * strictest strategy first. Returns null when nothing usable can be recovered.
+ */
+export function parseLoose(input: string): LooseParseResult | null {
+  const trimmed = input.trim()
+  if (!trimmed) return null
+
+  try {
+    return { data: JSON.parse(trimmed), source: 'json' }
+  } catch {}
+
+  const extracted = extractJsonFromText(trimmed)
+  if (extracted) {
+    try {
+      return { data: JSON.parse(extracted), source: 'extracted' }
+    } catch {}
+  }
+
+  if (looksLikePrintedMap(trimmed)) {
+    try {
+      const parsed = tryParsePrintedMap(trimmed)
+      if (parsed && Object.keys(parsed).length > 0) {
+        return { data: parsed, source: 'printed-map' }
+      }
+    } catch {}
+  }
+
+  const repaired = repairJson(trimmed)
+  if (repaired) {
+    try {
+      return { data: JSON.parse(repaired), source: 'repaired' }
+    } catch {}
+  }
+
+  return null
+}
+
 export function useJsonParser() {
   function inferType(val: any): ASTNode['inferredType'] {
     if (val === null) return 'null'
@@ -234,30 +345,14 @@ export function useJsonParser() {
       const parsed = JSON.parse(trimmed)
       return parseVal('root', parsed)
     } catch (e: any) {
-      // Only attempt the relaxed recovery for genuine printed-map input.
-      if (looksLikePrintedMap(trimmed)) {
-        try {
-          const parsedObj = tryParsePrintedMap(trimmed)
-          if (parsedObj && Object.keys(parsedObj).length > 0) {
-            return parseVal('root', parsedObj)
-          }
-        } catch (err) {
-          console.error('[JSON Model Generator] Failed to parse as printed map:', err)
-        }
-      }
-
-      // Best-effort repair so models can still be generated from broken JSON.
-      const repaired = repairJson(trimmed)
-      if (repaired) {
+      // Recover JSON embedded in log output, printed maps, or broken syntax.
+      const loose = parseLoose(trimmed)
+      if (loose) {
         console.warn(
-          '[JSON Model Generator] Invalid JSON recovered via best-effort repair. Original error:',
+          `[JSON Model Generator] Invalid JSON recovered via "${loose.source}". Original error:`,
           e.message
         )
-        try {
-          return parseVal('root', JSON.parse(repaired))
-        } catch (err) {
-          console.error('[JSON Model Generator] Repaired JSON still failed to parse:', err)
-        }
+        return parseVal('root', loose.data)
       }
       throw e
     }
