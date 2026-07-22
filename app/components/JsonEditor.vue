@@ -52,6 +52,11 @@ onMounted(async () => {
           cursorBlinking: 'smooth',
           cursorSmoothCaretAnimation: 'on',
           wordWrap: 'on',
+          // Pasted log dumps arrive as a few enormous single lines. Monaco stops
+          // drawing a line past 10k chars and stops colourising past 20k by
+          // default, which looks like the content was truncated — lift both.
+          stopRenderingLineAfterLength: -1,
+          maxTokenizationLineLength: 100_000_000,
           padding: { top: 12, bottom: 12 },
           scrollbar: {
             verticalScrollbarSize: 8,
