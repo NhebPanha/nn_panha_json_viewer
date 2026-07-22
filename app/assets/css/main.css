@@ -98,6 +98,60 @@ html, body {
   -webkit-backdrop-filter: blur(12px);
 }
 
+/*
+ * Fullscreen focus mode.
+ * The shell is pinned to the viewport so <main> receives exactly the space left
+ * over by the header and footer (both stay visible). The panel then flexes to
+ * fill that space — no hard-coded chrome heights.
+ */
+body.fs-mode {
+  overflow: hidden;
+}
+
+body.fs-mode .app-shell {
+  height: 100vh;
+}
+
+/* Edge-to-edge: drop the max-width cap and all padding so the panel
+   fits the full viewport width and height between header and footer. */
+body.fs-mode .app-main {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  max-width: none;
+  padding: 0;
+}
+
+/* Panel container: override the grid so the single visible panel fills. */
+.fullscreen-mode {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.fullscreen-mode > div {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.fullscreen-mode .editor-shell,
+.fullscreen-mode .monaco-host {
+  height: 100%;
+  min-height: 0;
+}
+
+/* Flush against the viewport edges: no rounding, no side borders. */
+.fullscreen-mode .rounded-2xl,
+.fullscreen-mode .rounded-t-2xl,
+.fullscreen-mode .rounded-b-2xl {
+  border-radius: 0;
+}
+
+.fullscreen-mode > div {
+  border-left-width: 0;
+  border-right-width: 0;
+}
+
 /* Transition for layout loads */
 .fade-enter-active,
 .fade-leave-active {

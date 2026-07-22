@@ -83,6 +83,11 @@ export const useEditorStore = defineStore('editor', () => {
           lineError.value = null
         }
       }
+
+      console.error('[JSON Model Generator] Invalid JSON input', {
+        message: e.message,
+        line: lineError.value
+      })
       return false
     }
   }

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, watch } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useEditorStore } from '~/stores/editor.store'
 import { useGeneratorStore } from '~/stores/generator.store'
 import { useCodeGenerator } from '~/composables/useCodeGenerator'
@@ -27,6 +27,19 @@ const route = useRoute()
 
 const isDragging = ref(false)
 
+// Fullscreen focus mode: the active panel fills the viewport between the
+// header and footer (both stay visible); the settings panel is hidden.
+const isAnyFullscreen = computed(
+  () => editorStore.isFullscreen || generatorStore.isFullscreen
+)
+
+// Pins the app shell to the viewport so <main> gets exactly the leftover space.
+useHead({
+  bodyAttrs: {
+    class: computed(() => (isAnyFullscreen.value ? 'fs-mode' : ''))
+  }
+})
+
 // Main generate wrapper
 const triggerGenerate = () => {
   if (!editorStore.rawJson.trim()) {
@@ -34,11 +47,8 @@ const triggerGenerate = () => {
     return
   }
   
-  if (!editorStore.isValid) {
-    toast.error('JSON has errors. Please format or fix them before generating.')
-    return
-  }
-
+  // Invalid JSON no longer blocks generation — the parser attempts a
+  // best-effort repair and errors are logged to the console for debugging.
   try {
     const output = codeGen.generate(
       editorStore.rawJson,
@@ -48,6 +58,7 @@ const triggerGenerate = () => {
     )
     generatorStore.generatedCode = output
   } catch (error: any) {
+    console.error('[JSON Model Generator] Generation failed:', error)
     toast.error(`Generation failed: ${error.message}`)
   }
 }
@@ -59,9 +70,7 @@ watch([
   () => generatorStore.selectedFramework,
   () => generatorStore.rootClassName
 ], () => {
-  if (editorStore.isValid) {
-    triggerGenerate()
-  }
+  triggerGenerate()
 }, { immediate: true })
 
 // Drag & Drop handlers
@@ -180,7 +189,8 @@ onBeforeUnmount(() => {
     @dragover="handleDragOver"
     @dragleave="handleDragLeave"
     @drop="handleDrop"
-    class="relative space-y-6"
+    class="relative"
+    :class="isAnyFullscreen ? 'flex flex-col flex-1 min-h-0' : 'space-y-6'"
   >
     <!-- Drag & Drop overlay -->
     <div
@@ -203,14 +213,14 @@ onBeforeUnmount(() => {
     />
 
     <!-- Settings Controls Panel (moved above the editor panels) -->
-    <div id="settings">
+    <div v-if="!isAnyFullscreen" id="settings">
       <GenerationSettings @generate="triggerGenerate" />
     </div>
 
     <!-- Panels: Editor & Preview -->
-    <div 
-      class="grid grid-cols-1 lg:gap-6" 
-      :class="(generatorStore.isFullscreen || editorStore.isFullscreen) ? 'lg:grid-cols-1' : 'lg:grid-cols-2'"
+    <div
+      class="grid grid-cols-1 lg:gap-6"
+      :class="isAnyFullscreen ? 'lg:grid-cols-1 fullscreen-mode' : 'lg:grid-cols-2'"
     >
       <!-- Left Panel: JSON Input -->
       <div v-if="!generatorStore.isFullscreen" class="flex flex-col h-full bg-white dark:bg-slate-950/20 border border-slate-200 dark:border-slate-800/80 rounded-2xl shadow-xs overflow-hidden">
